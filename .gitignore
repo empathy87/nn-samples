@@ -1,2 +1,3 @@
 keras/regression/data_stocks.csv
 keras/regression/.ipynb_checkpoints
+keras/regression/*.txt
