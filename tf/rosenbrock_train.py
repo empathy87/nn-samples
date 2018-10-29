@@ -1,7 +1,9 @@
 """Script to train Rosenbrock function MLP approximation.
 
 A simple usage example:
-python rosenbrock_train.py -N=4 -m=5000 -hidden="[8,4]" -opt=lm -kwargs="{'mu':3.,'mu_inc':10,'mu_dec':10,'max_inc':10}" -out=log.txt
+python rosenbrock_train.py -N=7 -m=20000 -hidden=[16,12,8] -opt=lm -kwargs={'mu':3.,'mu_inc':10,'mu_dec':10,'max_inc':10} -out=log1.txt
+python rosenbrock_train.py -N=7 -m=20000 -hidden=[16,12,8] -opt=sgd -kwargs={'learning_rate':1e-3} -out=log2.txt
+python rosenbrock_train.py -N=7 -m=20000 -hidden=[16,12,8] -opt=adam -kwargs={'learning_rate':1e-3} -out=log3.txt
 """
 import argparse
 import numpy as np
@@ -46,11 +48,14 @@ INITIALIZERS = {'xavier': tf.contrib.layers.xavier_initializer(),
                 'rand_uniform': tf.random_uniform_initializer(),
                 'rand_normal': tf.random_normal_initializer()}
 
+TF_OPTIMIZERS = {'sgd': tf.train.GradientDescentOptimizer,
+                 'adam': tf.train.AdamOptimizer}
+
 DT = tf.float64
 DT_NP = np.float64
 
 TARGET_LOSS = 1e-10
-MAX_STEPS = 4000
+MAX_STEPS = 400000000
 
 LOG_INTERVAL_IN_SEC = 10
 
@@ -151,6 +156,19 @@ def train_lm(feed_dict, params, y_hat, r, loss, mu, mu_inc, mu_dec, max_inc):
             break
 
 
+def tf_train(feed_dict, loss, train_step):
+    step = 0
+    session = tf.Session()
+    session.run(tf.global_variables_initializer())
+    # calc initial loss
+    current_loss = session.run(loss, feed_dict)
+    while current_loss > TARGET_LOSS and step < MAX_STEPS:
+        step += 1
+        log(step, current_loss)
+        session.run(train_step, feed_dict)
+        current_loss = session.run(loss, feed_dict)
+
+
 def main():
     global log_file_name
     args = parser.parse_args()
@@ -162,10 +180,10 @@ def main():
     mlp_hidden_layers_cnt = len(mlp_hidden_structure)
     kwargs = eval(args.kwargs)
     log_file_name = args.out
+    optimizer_name = args.optimizer
 
     with open(log_file_name, "a") as file:
         file.write(f'{" ".join(sys.argv[1:])}\n')
-
 
     dp_x, dp_y, x_norm, y_norm = get_rand_rosenbrock_data_points(N, m, (-2, 2))
 
@@ -198,7 +216,11 @@ def main():
     r = y - y_hat
     loss = tf.reduce_mean(tf.square(r))
 
-    train_lm(feed_dict, params, y_hat, r, loss, **kwargs)
+    if optimizer_name == 'lm':
+        train_lm(feed_dict, params, y_hat, r, loss, **kwargs)
+    else:
+        train_step = TF_OPTIMIZERS[optimizer_name](**kwargs).minimize(loss)
+        tf_train(feed_dict, loss, train_step)
 
 
 main()
