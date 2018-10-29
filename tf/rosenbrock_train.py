@@ -39,14 +39,15 @@ parser.add_argument(
     '-out', help='output stat file name',
     type=str, default='log.txt')
 
+SEED = 10
 
 ACTIVATIONS = {'tanh': tf.nn.tanh,
                'relu': tf.nn.relu,
                'sigmoid': tf.nn.sigmoid}
 
-INITIALIZERS = {'xavier': tf.contrib.layers.xavier_initializer(),
-                'rand_uniform': tf.random_uniform_initializer(),
-                'rand_normal': tf.random_normal_initializer()}
+INITIALIZERS = {'xavier': tf.contrib.layers.xavier_initializer(seed=SEED),
+                'rand_uniform': tf.random_uniform_initializer(seed=SEED),
+                'rand_normal': tf.random_normal_initializer(seed=SEED)}
 
 TF_OPTIMIZERS = {'sgd': tf.train.GradientDescentOptimizer,
                  'adam': tf.train.AdamOptimizer}
@@ -71,12 +72,15 @@ def log(step, loss):
         return
     if not log_prev_time:
         log_prev_time, log_first_time = now, now
+    message = f'{step} {int(now-log_first_time)} {loss}'
+    print(message)
     with open(log_file_name, "a") as file:
-        file.write(f'{step} {int(now-log_first_time)} {loss}\n')
+        file.write(message+'\n')
     log_prev_time = now
 
 
 def get_rand_rosenbrock_data_points(n, m, x_range, x_norm=None, y_norm=None):
+    np.random.seed(SEED)
     x = np.random.uniform(*x_range, (m, n))
     y = np.zeros(shape=(m, 1), dtype=DT_NP)
     # include local and global minima for 4 <= N <= 7
