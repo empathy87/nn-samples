@@ -10,7 +10,8 @@ import numpy as np
 import tensorflow as tf
 import time
 import sys
-
+import pickle
+import os.path
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -38,7 +39,8 @@ parser.add_argument(
 parser.add_argument(
     '-out', help='output stat file name',
     type=str, default='log.txt')
-
+parser.add_argument("-c", "--cont", help="continue starting from ckpt",
+                    action="store_true")
 SEED = 10
 
 ACTIVATIONS = {'tanh': tf.nn.tanh,
@@ -63,19 +65,26 @@ LOG_INTERVAL_IN_SEC = 10
 log_file_name = None
 log_prev_time, log_first_time = None, None
 
+step_delta, time_delta = 0, 0
 
-def log(step, loss):
+
+def log(step, loss, session, params, mu=None):
     global log_prev_time, log_first_time
 
     now = time.time()
-    if log_prev_time and now-log_prev_time < LOG_INTERVAL_IN_SEC:
+    if log_prev_time and now - log_prev_time < LOG_INTERVAL_IN_SEC:
         return
     if not log_prev_time:
         log_prev_time, log_first_time = now, now
-    message = f'{step} {int(now-log_first_time)} {loss}'
+    secs_from_start = int(now-log_first_time) + time_delta
+    step += step_delta
+    message = f'{step} {secs_from_start} {loss}'
+    if mu:
+        message += f' {mu}'
     print(message)
-    with open(log_file_name, "a") as file:
-        file.write(message+'\n')
+    with open(log_file_name, 'a') as file:
+        file.write(message + '\n')
+    pickle.dump((step, secs_from_start, session.run(params)), open(log_file_name + '.ckpt', "wb"))
     log_prev_time = now
 
 
@@ -88,14 +97,14 @@ def get_rand_rosenbrock_data_points(n, m, x_range, x_norm=None, y_norm=None):
     x[1, :] = [1] * n
     for s in range(m):
         for i in range(n - 1):
-            y[s] += 100*((x[s, i+1]-x[s, i]**2)**2) + (1-x[s,i])**2
+            y[s] += 100 * ((x[s, i + 1] - x[s, i] ** 2) ** 2) + (1 - x[s, i]) ** 2
     # do normalization
     if not x_norm:
         x_norm = max(x_range)
     if not y_norm:
         y_norm = max(y)[0]
-    x = x/x_norm
-    y = y/y_norm - 0.5
+    x = x / x_norm
+    y = y / y_norm - 0.5
     return x, y, x_norm, y_norm
 
 
@@ -106,7 +115,7 @@ def jacobian(y, x, m):
     ]
     _, jacobian = tf.while_loop(
         lambda i, _: i < m,
-        lambda i, res: (i+1, res.write(i, tf.squeeze(tf.gradients(y[i], x)))),
+        lambda i, res: (i + 1, res.write(i, tf.squeeze(tf.gradients(y[i], x)))),
         loop_vars)
     return jacobian.stack()
 
@@ -141,7 +150,7 @@ def train_lm(feed_dict, params, y_hat, r, loss, mu, mu_inc, mu_dec, max_inc):
     current_loss = session.run(loss, feed_dict)
     while current_loss > TARGET_LOSS and step < MAX_STEPS:
         step += 1
-        log(step, current_loss)
+        log(step, current_loss, session, params, feed_dict[mu_current])
         session.run(save_params)
         session.run(save_hess_g, feed_dict)
         success = False
@@ -160,7 +169,7 @@ def train_lm(feed_dict, params, y_hat, r, loss, mu, mu_inc, mu_dec, max_inc):
             break
 
 
-def tf_train(feed_dict, loss, train_step):
+def tf_train(feed_dict, params, loss, train_step):
     step = 0
     session = tf.Session()
     session.run(tf.global_variables_initializer())
@@ -168,13 +177,13 @@ def tf_train(feed_dict, loss, train_step):
     current_loss = session.run(loss, feed_dict)
     while current_loss > TARGET_LOSS and step < MAX_STEPS:
         step += 1
-        log(step, current_loss)
+        log(step, current_loss, session, params)
         session.run(train_step, feed_dict)
         current_loss = session.run(loss, feed_dict)
 
 
 def main():
-    global log_file_name
+    global log_file_name, step_delta, time_delta
     args = parser.parse_args()
 
     N, m = args.N, args.m
@@ -186,9 +195,6 @@ def main():
     log_file_name = args.out
     optimizer_name = args.optimizer
 
-    with open(log_file_name, "a") as file:
-        file.write(f'{" ".join(sys.argv[1:])}\n')
-
     dp_x, dp_y, x_norm, y_norm = get_rand_rosenbrock_data_points(N, m, (-2, 2))
 
     # placeholder variables (we have m data points)
@@ -198,14 +204,21 @@ def main():
 
     mlp_structure = [N] + mlp_hidden_structure + [1]
     tensors_shapes = []
-    for i in range(len(mlp_hidden_structure)+1):
+    for i in range(len(mlp_hidden_structure) + 1):
         tensors_shapes.append((mlp_structure[i], mlp_structure[i + 1]))
         tensors_shapes.append((1, mlp_structure[i + 1]))
     tensors_sizes = [h * w for h, w in tensors_shapes]
     neurons_cnt = sum(tensors_sizes)
     print(f'Total number of trainable parameters is {neurons_cnt}')
 
-    params = tf.Variable(initializer([neurons_cnt], dtype=DT))
+    if args.cont and os.path.exists(log_file_name + '.ckpt'):
+        step_delta, time_delta, ckpt_params = pickle.load(open(log_file_name + '.ckpt', "rb"))
+        params = tf.Variable(ckpt_params, dtype=DT)
+    else:
+        with open(log_file_name, "a") as file:
+            file.write(f'{" ".join(sys.argv[1:])}\n')
+        params = tf.Variable(initializer([neurons_cnt], dtype=DT))
+
     tensors = tf.split(params, tensors_sizes, 0)
     for i in range(len(tensors)):
         tensors[i] = tf.reshape(tensors[i], tensors_shapes[i])
@@ -224,7 +237,7 @@ def main():
         train_lm(feed_dict, params, y_hat, r, loss, **kwargs)
     else:
         train_step = TF_OPTIMIZERS[optimizer_name](**kwargs).minimize(loss)
-        tf_train(feed_dict, loss, train_step)
+        tf_train(feed_dict, params, loss, train_step)
 
 
 main()
