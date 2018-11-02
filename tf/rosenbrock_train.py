@@ -141,7 +141,7 @@ def jacobian(y, x):
     ]
     _, j = tf.while_loop(
         lambda i, _: i < m,
-        lambda i, res: (i + 1, res.write(i, tf.squeeze(tf.gradients(y[i], x)))),
+        lambda i, res: (i + 1, res.write(i, tf.gradients(y[i], x)[0])),
         loop_vars)
     return j.stack()
 
