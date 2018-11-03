@@ -84,6 +84,7 @@ def parse_arguments():
     activation = ACTIVATIONS[args.activation]
     initializer = INITIALIZERS[args.initializer]
     optimizer = args.optimizer
+    print(args.kwargs)
     kwargs = eval(args.kwargs)
     out = args.out
     use_checkpoint = args.cont
