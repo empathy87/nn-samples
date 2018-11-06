@@ -149,16 +149,23 @@ def jacobian(y, x):
 
 # performs network training and updates params values according to
 # Levenberg-Marquardt optimization.
-def train_lm(feed_dict, params, y_hat, r, loss, mu, mu_inc, mu_dec, max_inc):
+def train_lm(feed_dict, params, y_hat, r, loss, mu, mu_inc, mu_dec, max_inc, hess_approx=True):
     neurons_cnt = params.shape[0].value
 
     mu_current = tf.placeholder(TF_DATA_TYPE, shape=[1])
     i = tf.eye(neurons_cnt, dtype=TF_DATA_TYPE)
     y_hat_flat = tf.squeeze(y_hat)
-    j = jacobian(y_hat_flat, params)
-    j_t = tf.transpose(j)
-    hess = tf.matmul(j_t, j)
-    g = tf.matmul(j_t, r)
+
+    if hess_approx:
+        j = jacobian(y_hat_flat, params)
+        j_t = tf.transpose(j)
+        hess = tf.matmul(j_t, j)
+        g = tf.matmul(j_t, r)
+    else:
+        hess = tf.hessians(loss, params)[0]
+        g = -tf.gradients(loss, params)[0]
+        g = tf.reshape(g, shape=(neurons_cnt, 1)) 
+
     p_store = tf.Variable(tf.zeros([neurons_cnt], dtype=TF_DATA_TYPE))
     hess_store = tf.Variable(tf.zeros((neurons_cnt, neurons_cnt), dtype=TF_DATA_TYPE))
     g_store = tf.Variable(tf.zeros((neurons_cnt, 1), dtype=TF_DATA_TYPE))
